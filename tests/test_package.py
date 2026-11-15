@@ -13,7 +13,7 @@ class InstallerPackageTests(unittest.TestCase):
     def test_package_metadata_and_payload(self):
         build = (ROOT / "PKGBUILD").read_text()
         self.assertIn("pkgname=cambonos-installer", build)
-        self.assertIn("pkgver=0.2.3", build)
+        self.assertIn("pkgver=0.2.4", build)
         self.assertIn("pkgrel=1", build)
         self.assertIn("'curl'", build)
         self.assertIn("'networkmanager'", build)
@@ -38,7 +38,7 @@ class InstallerPackageTests(unittest.TestCase):
             self.assertTrue((pkgdir / "usr/bin/cambonos-installer").is_file())
             self.assertEqual(
                 (pkgdir / "usr/share/cambonos-installer/version").read_text(),
-                "0.2.3-1\n",
+                "0.2.4-1\n",
             )
             self.assertFalse((pkgdir / "usr/share/cambonos-installer/configs").exists())
 
@@ -556,6 +556,11 @@ class InstallerPackageTests(unittest.TestCase):
         self.assertGreater(count, 0)
         self.assertIn('confirmation="Equipo:', installer)
         self.assertIn('--yesno "\\n$confirmation"', installer)
+
+    def test_message_boxes_use_auto_sizing(self):
+        installer = (ROOT / "files" / "cambonos-installer").read_text()
+        self.assertIn('dialog --title "$TITLE" --msgbox "\\n$message" 0 0', installer)
+        self.assertEqual(installer.count("--msgbox"), 1)
 
     def test_progress_emits_gauge_messages_without_regressing(self):
         installer = ROOT / "files" / "cambonos-installer"
