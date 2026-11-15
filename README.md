@@ -52,6 +52,10 @@ Durante la instalación, la barra muestra la etapa activa para que las
 operaciones largas no parezcan detenidas. El porcentaje es orientativo y avanza
 por etapas; no representa una medición continua del trabajo restante.
 
+Para NVIDIA, incluida la configuración híbrida, se instala `nvidia-open` para
+el kernel `linux`. Este controlador no es compatible con todas las generaciones
+de GPU NVIDIA; comprueba la compatibilidad del equipo antes de instalar.
+
 Para construirlo desde este repositorio en Arch Linux:
 
 ```sh

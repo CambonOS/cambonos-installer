@@ -13,7 +13,7 @@ class InstallerPackageTests(unittest.TestCase):
     def test_package_metadata_and_payload(self):
         build = (ROOT / "PKGBUILD").read_text()
         self.assertIn("pkgname=cambonos-installer", build)
-        self.assertIn("pkgver=0.2.4", build)
+        self.assertIn("pkgver=0.2.5", build)
         self.assertIn("pkgrel=1", build)
         self.assertIn("'curl'", build)
         self.assertIn("'networkmanager'", build)
@@ -38,7 +38,7 @@ class InstallerPackageTests(unittest.TestCase):
             self.assertTrue((pkgdir / "usr/bin/cambonos-installer").is_file())
             self.assertEqual(
                 (pkgdir / "usr/share/cambonos-installer/version").read_text(),
-                "0.2.4-1\n",
+                "0.2.5-1\n",
             )
             self.assertFalse((pkgdir / "usr/share/cambonos-installer/configs").exists())
 
@@ -49,6 +49,23 @@ class InstallerPackageTests(unittest.TestCase):
         self.assertNotIn("DATA_DIR", source)
         self.assertNotIn('cp -a "$DATA_DIR/."', source)
         self.assertNotIn("configs", build)
+
+    def test_nvidia_gpu_package_selection(self):
+        source = (ROOT / "files" / "cambonos-installer").read_text()
+        selection = source.split('case "$GPU" in', 1)[1].split('esac', 1)[0]
+        for gpu in ("nvidia", "nvidia-hybrid"):
+            with self.subTest(gpu=gpu):
+                result = subprocess.run(
+                    ["bash", "-c", 'GPU=$1; case "$GPU" in ' + selection +
+                     ' esac; printf "%s\\n" "${gpu_packages[@]}"', "bash", gpu],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(result.stdout.splitlines(), [
+                    "nvidia-open", "nvidia-utils", "lib32-nvidia-utils",
+                    "nvidia-settings", "vulkan-icd-loader", "lib32-vulkan-icd-loader",
+                ])
 
     def test_yay_is_built_for_all_installs_and_only_used_for_hybrid_nvidia(self):
         installer = ROOT / "files" / "cambonos-installer"
