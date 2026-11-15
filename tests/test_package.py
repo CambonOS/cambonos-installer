@@ -43,7 +43,7 @@ class InstallerPackageTests(unittest.TestCase):
             self.assertFalse((pkgdir / "usr/share/cambonos-installer/configs").exists())
 
     def test_installer_does_not_depend_on_configuration_payload(self):
-        installer = ROOT / "files" / "bin" / "cambonos-installer"
+        installer = ROOT / "files" / "cambonos-installer"
         source = installer.read_text()
         build = (ROOT / "PKGBUILD").read_text()
         self.assertNotIn("DATA_DIR", source)
@@ -51,7 +51,7 @@ class InstallerPackageTests(unittest.TestCase):
         self.assertNotIn("configs", build)
 
     def test_yay_is_built_for_all_installs_and_only_used_for_hybrid_nvidia(self):
-        installer = ROOT / "files" / "bin" / "cambonos-installer"
+        installer = ROOT / "files" / "cambonos-installer"
         for gpu, expected_calls in (
             ("intel", 1),
             ("nvidia-hybrid", 2),
@@ -79,13 +79,13 @@ class InstallerPackageTests(unittest.TestCase):
     def test_entrypoints_have_valid_bash_syntax(self):
         for path in (
             ROOT / "PKGBUILD",
-            ROOT / "files" / "bin" / "cambonos-installer",
+            ROOT / "files" / "cambonos-installer",
         ):
             with self.subTest(path=path.name):
                 subprocess.run(["bash", "-n", str(path)], check=True)
 
     def test_desktop_menu_keeps_legacy_options_and_adds_cambonos_xfce(self):
-        installer = ROOT / "files" / "bin" / "cambonos-installer"
+        installer = ROOT / "files" / "cambonos-installer"
         for selection, desktop in (("1", "xfce"), ("2", "qtile"), ("3", "cambonos-xfce")):
             with self.subTest(selection=selection):
                 result = subprocess.run(
@@ -117,7 +117,7 @@ class InstallerPackageTests(unittest.TestCase):
                 )
 
     def test_localization_choices_write_locale_keyboard_and_timezone(self):
-        installer = ROOT / "files" / "bin" / "cambonos-installer"
+        installer = ROOT / "files" / "cambonos-installer"
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory)
             (target / "etc").mkdir()
@@ -144,7 +144,7 @@ class InstallerPackageTests(unittest.TestCase):
         self.assertIn("locale-gen", result.stdout)
 
     def test_upgrade_package_installation_is_opt_in(self):
-        installer = ROOT / "files" / "bin" / "cambonos-installer"
+        installer = ROOT / "files" / "cambonos-installer"
         for enabled in ("yes", "no"):
             with self.subTest(enabled=enabled):
                 result = subprocess.run(
@@ -163,7 +163,7 @@ class InstallerPackageTests(unittest.TestCase):
                 )
 
     def test_upgrade_package_preflight_runs_only_when_selected(self):
-        installer = ROOT / "files" / "bin" / "cambonos-installer"
+        installer = ROOT / "files" / "cambonos-installer"
         for enabled, available in (("yes", "yes"), ("yes", "no"), ("no", "no")):
             with self.subTest(enabled=enabled, available=available):
                 result = subprocess.run(
@@ -182,7 +182,7 @@ class InstallerPackageTests(unittest.TestCase):
                     self.assertIn("cambonos-upgrade", result.stdout)
 
     def test_installer_no_longer_embeds_upgrade_service_or_broad_sudo(self):
-        installer = (ROOT / "files" / "bin" / "cambonos-installer").read_text()
+        installer = (ROOT / "files" / "cambonos-installer").read_text()
         self.assertIn("pacman -S --noconfirm cambonos-upgrade", installer)
         self.assertIn("pacman -Si cambonos-upgrade", installer)
         self.assertNotIn("cambonos-upgrade.timer", installer)
@@ -191,7 +191,7 @@ class InstallerPackageTests(unittest.TestCase):
         self.assertNotIn("systemd-inhibit", installer)
 
     def test_system_defaults_are_generated_and_pam_policy_is_idempotent(self):
-        installer = ROOT / "files" / "bin" / "cambonos-installer"
+        installer = ROOT / "files" / "cambonos-installer"
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory)
             pam_dir = target / "etc/pam.d"
@@ -234,7 +234,7 @@ class InstallerPackageTests(unittest.TestCase):
         self.assertEqual(su_l_file.count("auth include su"), 1)
 
     def test_pam_wheel_configuration_fails_on_unrecognized_stack(self):
-        installer = ROOT / "files" / "bin" / "cambonos-installer"
+        installer = ROOT / "files" / "cambonos-installer"
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory)
             pam_dir = target / "etc/pam.d"
@@ -252,7 +252,7 @@ class InstallerPackageTests(unittest.TestCase):
         self.assertIn("No se pudo aplicar la política wheel", result.stderr)
 
     def test_keyboard_menu_maps_console_and_xorg_layouts(self):
-        installer = ROOT / "files" / "bin" / "cambonos-installer"
+        installer = ROOT / "files" / "cambonos-installer"
         result = subprocess.run(
             [
                 "bash", "-c",
@@ -266,7 +266,7 @@ class InstallerPackageTests(unittest.TestCase):
         self.assertEqual(result.stdout.strip(), "latam|la-latin1")
 
     def test_cambonos_xfce_preflight_checks_the_destination_channel(self):
-        installer = ROOT / "files" / "bin" / "cambonos-installer"
+        installer = ROOT / "files" / "cambonos-installer"
         for repository in ("cambonos", "cambonos-testing"):
             for available in ("yes", "no"):
                 with self.subTest(repository=repository, available=available):
@@ -290,7 +290,7 @@ class InstallerPackageTests(unittest.TestCase):
                         self.assertIn("no está disponible", result.stderr)
 
     def test_legacy_desktop_preflight_requires_archie(self):
-        installer = ROOT / "files" / "bin" / "cambonos-installer"
+        installer = ROOT / "files" / "cambonos-installer"
         with tempfile.TemporaryDirectory() as directory:
             for desktop in ("xfce", "qtile"):
                 source = Path(directory) / desktop
@@ -312,7 +312,7 @@ class InstallerPackageTests(unittest.TestCase):
                             self.assertIn("archie.sh", result.stderr)
 
     def test_cambonos_xfce_installation_and_failure(self):
-        installer = ROOT / "files" / "bin" / "cambonos-installer"
+        installer = ROOT / "files" / "cambonos-installer"
         for repository in ("cambonos", "cambonos-testing"):
             for install_status in (0, 42):
                 with self.subTest(repository=repository, install_status=install_status):
@@ -334,7 +334,7 @@ class InstallerPackageTests(unittest.TestCase):
                             self.assertEqual(session.read_text(), "[Seat:*]\nuser-session=cambonos-xfce\n")
 
     def test_legacy_desktop_installation_still_runs_archie(self):
-        installer = ROOT / "files" / "bin" / "cambonos-installer"
+        installer = ROOT / "files" / "cambonos-installer"
         for desktop in ("xfce", "qtile"):
             with self.subTest(desktop=desktop):
                 result = subprocess.run(
@@ -357,7 +357,7 @@ class InstallerPackageTests(unittest.TestCase):
                 ])
 
     def test_network_retries_and_opens_nmtui(self):
-        installer = ROOT / "files" / "bin" / "cambonos-installer"
+        installer = ROOT / "files" / "cambonos-installer"
         result = subprocess.run(
             [
                 "bash", "-c",
@@ -374,7 +374,7 @@ class InstallerPackageTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_update_displays_output_and_preserves_pacman_status(self):
-        installer = ROOT / "files" / "bin" / "cambonos-installer"
+        installer = ROOT / "files" / "cambonos-installer"
         for expected_status in (0, 42):
             with self.subTest(status=expected_status):
                 result = subprocess.run(
@@ -395,7 +395,7 @@ class InstallerPackageTests(unittest.TestCase):
                 self.assertEqual("ERROR:" in result.stdout, expected_status != 0)
 
     def test_update_failure_does_not_restart(self):
-        installer = ROOT / "files" / "bin" / "cambonos-installer"
+        installer = ROOT / "files" / "cambonos-installer"
         result = subprocess.run(
             [
                 "bash", "-c",
@@ -410,7 +410,7 @@ class InstallerPackageTests(unittest.TestCase):
         self.assertNotIn("unexpected restart", result.stdout)
 
     def test_update_reports_temporary_directory_failure(self):
-        installer = ROOT / "files" / "bin" / "cambonos-installer"
+        installer = ROOT / "files" / "cambonos-installer"
         result = subprocess.run(
             [
                 "bash", "-c",
@@ -427,7 +427,7 @@ class InstallerPackageTests(unittest.TestCase):
         self.assertNotIn("unexpected pacman", result.stdout)
 
     def test_successful_update_restarts_once_and_clears_marker(self):
-        installer = ROOT / "files" / "bin" / "cambonos-installer"
+        installer = ROOT / "files" / "cambonos-installer"
         with tempfile.TemporaryDirectory() as directory:
             replacement = Path(directory) / "replacement"
             replacement.write_text(
@@ -459,7 +459,7 @@ class InstallerPackageTests(unittest.TestCase):
         ])
 
     def test_installation_flow_lives_in_the_single_entrypoint(self):
-        installer = (ROOT / "files" / "bin" / "cambonos-installer").read_text()
+        installer = (ROOT / "files" / "cambonos-installer").read_text()
         self.assertIn('readonly TITLE=" CambonOS Installer ${PACKAGE_VERSION} "', installer)
         self.assertIn('PACKAGE_VERSION=$(<"$VERSION_FILE")', installer)
         self.assertIn("collect_options()", installer)
@@ -471,7 +471,7 @@ class InstallerPackageTests(unittest.TestCase):
             self.assertFalse((ROOT / path).exists())
 
     def test_free_partition_detection_waits_and_targets_only_the_new_efi(self):
-        installer = ROOT / "files" / "bin" / "cambonos-installer"
+        installer = ROOT / "files" / "cambonos-installer"
         for scenario in ("delayed", "missing-efi", "missing-root", "duplicate-efi", "duplicate-root", "invalid-number"):
             with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as directory:
                 result = subprocess.run(
@@ -521,7 +521,7 @@ class InstallerPackageTests(unittest.TestCase):
                     self.assertIn("no son únicas" if scenario.startswith("duplicate-") else "partición", result.stderr)
 
     def test_clean_partition_detection_supports_uefi_and_bios(self):
-        installer = ROOT / "files" / "bin" / "cambonos-installer"
+        installer = ROOT / "files" / "cambonos-installer"
         for boot_mode in ("uefi", "bios"):
             with self.subTest(boot_mode=boot_mode):
                 result = subprocess.run(
@@ -541,7 +541,7 @@ class InstallerPackageTests(unittest.TestCase):
                 self.assertEqual(result.stdout.strip(), expected)
 
     def test_dialog_prompts_start_with_a_newline(self):
-        installer = (ROOT / "files" / "bin" / "cambonos-installer").read_text()
+        installer = (ROOT / "files" / "cambonos-installer").read_text()
         widgets = re.finditer(
             r"--(?:menu|inputbox|passwordbox|yesno|msgbox|infobox|programbox|gauge)\s+",
             installer,
@@ -558,7 +558,7 @@ class InstallerPackageTests(unittest.TestCase):
         self.assertIn('--yesno "\\n$confirmation"', installer)
 
     def test_progress_emits_gauge_messages_without_regressing(self):
-        installer = ROOT / "files" / "bin" / "cambonos-installer"
+        installer = ROOT / "files" / "cambonos-installer"
         result = subprocess.run(
             [
                 "bash",
@@ -588,7 +588,7 @@ class InstallerPackageTests(unittest.TestCase):
         )
 
     def test_uefi_boot_entry_parser_matches_cambonos_path_and_partition(self):
-        installer = ROOT / "files" / "bin" / "cambonos-installer"
+        installer = ROOT / "files" / "cambonos-installer"
         result = subprocess.run(
             [
                 "bash",
@@ -614,7 +614,7 @@ class InstallerPackageTests(unittest.TestCase):
         )
 
     def test_uefi_boot_entry_replaces_stale_entry_and_verifies_new_partition(self):
-        installer = ROOT / "files" / "bin" / "cambonos-installer"
+        installer = ROOT / "files" / "cambonos-installer"
         result = subprocess.run(
             [
                 "bash",
@@ -658,7 +658,7 @@ class InstallerPackageTests(unittest.TestCase):
         self.assertEqual(result.stdout, "")
 
     def test_account_name_normalization_and_password_requirements(self):
-        installer = ROOT / "files" / "bin" / "cambonos-installer"
+        installer = ROOT / "files" / "cambonos-installer"
         result = subprocess.run(
             [
                 "bash",
@@ -701,7 +701,7 @@ class InstallerPackageTests(unittest.TestCase):
                 self.assertIn(f"{field}: ${field}", workflow)
 
     def test_base_and_grub_packages_replace_individual_dependencies(self):
-        installer = (ROOT / "files" / "bin" / "cambonos-installer").read_text()
+        installer = (ROOT / "files" / "cambonos-installer").read_text()
         bootstrap_packages = installer.split("base_packages=(", 1)[1].split(")", 1)[0].split()
         system_packages = installer.split("system_packages=(", 1)[1].split(")", 1)[0].split()
 
@@ -730,14 +730,14 @@ class InstallerPackageTests(unittest.TestCase):
         self.assertIn('run_chroot pacman -Syu --noconfirm', installer)
 
     def test_sudoers_mode_is_fixed_before_validation(self):
-        installer = (ROOT / "files" / "bin" / "cambonos-installer").read_text()
+        installer = (ROOT / "files" / "cambonos-installer").read_text()
         set_mode = 'chmod 440 "$mount_point/etc/sudoers.d/cambonos-installer"'
         self.assertIn(set_mode, installer)
         self.assertLess(installer.index(set_mode), installer.index("run_chroot visudo -c"))
 
     def test_help_does_not_start_the_installer(self):
         result = subprocess.run(
-            ["bash", str(ROOT / "files" / "bin" / "cambonos-installer"), "--help"],
+            ["bash", str(ROOT / "files" / "cambonos-installer"), "--help"],
             check=True,
             capture_output=True,
             text=True,
@@ -746,7 +746,7 @@ class InstallerPackageTests(unittest.TestCase):
 
     def test_unknown_argument_is_rejected(self):
         result = subprocess.run(
-            ["bash", str(ROOT / "files" / "bin" / "cambonos-installer"), "--invalid"],
+            ["bash", str(ROOT / "files" / "cambonos-installer"), "--invalid"],
             capture_output=True,
             text=True,
         )
