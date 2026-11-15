@@ -5,10 +5,12 @@ Distribución basada en Arch Linux con una instalación sencilla.
 
 El `PKGBUILD` construye el paquete Arch `cambonos-installer`. El ejecutable
 `/usr/bin/cambonos-installer` contiene el flujo completo: selección de opciones,
-particionado, instalación y configuración del sistema. La configuración base del
-live se empaqueta directamente bajo `/usr/share/cambonos-installer/configs/` y
-se incorpora al sistema sin una carpeta intermedia `cambonos-fs`; el idioma, la
-zona horaria y el teclado se generan según las opciones elegidas.
+particionado, instalación y configuración del sistema. Las configuraciones del
+sistema destino se generan durante la instalación; no se copia un árbol de
+configuración empaquetado. El idioma, la zona horaria y el teclado se aplican
+según las opciones elegidas. También se genera la configuración de cpupower, la
+shell predeterminada de cuentas nuevas, el drop-in de sudoers de CambonOS y la
+política PAM que limita `su` al grupo `wheel`.
 Está destinado al entorno live de CambonOS y debe ejecutarse como root.
 
 Al iniciar el instalador, se activa NetworkManager y se comprueba la conexión al

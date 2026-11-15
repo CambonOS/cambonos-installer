@@ -9,12 +9,6 @@ if [[ -r "$VERSION_FILE" ]]; then
 fi
 readonly TITLE=" CambonOS Installer ${PACKAGE_VERSION} "
 readonly MOUNT_POINT='/mnt'
-readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-if [[ -d "$SCRIPT_DIR/../configs/etc" ]]; then
-	readonly DATA_DIR="$SCRIPT_DIR/../configs"
-else
-	readonly DATA_DIR='/usr/share/cambonos-installer/configs'
-fi
 
 WORK_DIR=''
 KEEP_WORK_DIR=0
@@ -589,12 +583,45 @@ install_optional_upgrade_package() {
 	run_chroot pacman -S --noconfirm cambonos-upgrade
 }
 
+configure_pam_wheel() {
+	local mount_point=${1:-$MOUNT_POINT}
+	local pam_file
+	for pam_file in su su-l; do
+		local path="$mount_point/etc/pam.d/$pam_file"
+		[[ -f "$path" ]] || fail "No se encuentra la configuración PAM $path."
+		if grep -Eq '^[[:space:]]*auth[[:space:]]+required[[:space:]]+pam_wheel\.so[[:space:]]+use_uid([[:space:]]|$)' "$path"; then
+			continue
+		elif grep -Eq '^[[:space:]]*#[[:space:]]*auth[[:space:]]+required[[:space:]]+pam_wheel\.so[[:space:]]+use_uid([[:space:]]|$)' "$path"; then
+			sed -E -i 's/^[[:space:]]*#[[:space:]]*(auth[[:space:]]+required[[:space:]]+pam_wheel\.so[[:space:]]+use_uid.*)$/\1/' "$path"
+		elif [[ "$pam_file" == 'su-l' ]] && grep -Eq '^[[:space:]]*auth[[:space:]]+(include|substack)[[:space:]]+su([[:space:]]|$)' "$path"; then
+			continue
+		elif grep -Eq '^[[:space:]]*auth[[:space:]]+sufficient[[:space:]]+pam_rootok\.so([[:space:]]|$)' "$path"; then
+			sed -E -i '/^[[:space:]]*auth[[:space:]]+sufficient[[:space:]]+pam_rootok\.so([[:space:]]|$)/a auth required pam_wheel.so use_uid' "$path"
+		else
+			fail "No se pudo aplicar la política wheel de forma segura en $path."
+		fi
+	done
+}
+
+configure_system_defaults() {
+	local mount_point=${1:-$MOUNT_POINT}
+	install -d "$mount_point/etc/default"
+	printf "governor='performance'\n" > "$mount_point/etc/default/cpupower"
+	run_chroot useradd -D -s /bin/zsh
+	install -d -m 750 "$mount_point/etc/sudoers.d"
+	cat > "$mount_point/etc/sudoers.d/cambonos-installer" <<'EOF'
+%wheel ALL=(ALL) ALL
+updates ALL=(ALL) NOPASSWD: /usr/bin/pacman
+updates ALL=(ALL) NOPASSWD: /usr/bin/makepkg
+EOF
+	chmod 440 "$mount_point/etc/sudoers.d/cambonos-installer"
+	configure_pam_wheel "$mount_point"
+}
+
 configure_system() {
 	local -a services
 
-	progress 42 'Copiando la configuracion y activando servicios'
-	cp -a "$DATA_DIR/." "$MOUNT_POINT/"
-	chmod 440 "$MOUNT_POINT/etc/sudoers"
+	progress 42 'Configurando el sistema y activando servicios'
 	if [[ -d /etc/NetworkManager/system-connections ]]; then
 		install -d -m 700 "$MOUNT_POINT/etc/NetworkManager/system-connections"
 		cp -a /etc/NetworkManager/system-connections/. "$MOUNT_POINT/etc/NetworkManager/system-connections/"
@@ -622,7 +649,7 @@ configure_system() {
 		run_chroot useradd -m -d /home/.updates -s /bin/bash -g updates updates
 	fi
 	run_chroot passwd --lock updates
-	install -d -m 750 "$MOUNT_POINT/etc/sudoers.d"
+	configure_system_defaults "$MOUNT_POINT"
 	run_chroot visudo -c
 	install_yay_and_optional_optimus_manager
 	progress 54 "Instalando el entorno de escritorio: $DESKTOP"
@@ -737,7 +764,6 @@ main() {
 		esac
 	fi
 	[[ $EUID -eq 0 ]] || fail 'Ejecute el instalador como root desde el sistema live.'
-	[[ -d "$DATA_DIR/etc" ]] || fail "No se encuentra el árbol de configuración: $DATA_DIR"
 	require_commands dialog curl nmtui lsblk awk sed grep sort localectl parted partprobe udevadm mkfs.vfat mkfs.ext4 mount mountpoint umount timedatectl reflector pacman pacstrap arch-chroot genfstab mkswap swapon fallocate lspci systemctl install cp find chown chmod useradd groupadd passwd chsh visudo git makepkg grub-mkconfig
 	[[ ! -e "$MOUNT_POINT" ]] || [[ -d "$MOUNT_POINT" ]] || fail "$MOUNT_POINT existe y no es un directorio."
 	mountpoint -q "$MOUNT_POINT" && fail "$MOUNT_POINT ya está montado. Desmóntelo antes de iniciar el instalador."

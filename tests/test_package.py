@@ -13,34 +13,42 @@ class InstallerPackageTests(unittest.TestCase):
     def test_package_metadata_and_payload(self):
         build = (ROOT / "PKGBUILD").read_text()
         self.assertIn("pkgname=cambonos-installer", build)
-        self.assertIn("pkgver=0.2.2", build)
+        self.assertIn("pkgver=0.2.3", build)
         self.assertIn("pkgrel=1", build)
         self.assertIn("'curl'", build)
         self.assertIn("'networkmanager'", build)
         self.assertIn("'parted'", build)
-        self.assertIn("/usr/share/cambonos-installer/configs", build)
         self.assertIn("printf '%s-%s\\n' \"$pkgver\" \"$pkgrel\"", build)
         self.assertIn('/usr/share/cambonos-installer/version', build)
-        self.assertIn('cp -a "$startdir/files/configs/."', build)
-        self.assertTrue((ROOT / "files" / "configs" / "etc").is_dir())
+        self.assertNotIn("configs", build)
+        self.assertFalse((ROOT / "files" / "configs").exists())
         self.assertTrue((ROOT / "LICENSE").is_file())
-
-    def test_installer_accepts_configs_without_usr_payload(self):
-        installer = ROOT / "files" / "bin" / "cambonos-installer"
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            (root / "bin").mkdir()
-            (root / "configs" / "etc").mkdir(parents=True)
-            test_installer = root / "bin" / "cambonos-installer"
-            test_installer.write_text(installer.read_text())
-            result = subprocess.run(
-                [
-                    "bash", "-c", 'source "$1"; printf "%s\\n" "$DATA_DIR"',
-                    "config-root-test", str(test_installer),
-                ], capture_output=True, text=True,
+            pkgdir = Path(directory) / "pkg"
+            pkgdir.mkdir()
+            environment = os.environ.copy()
+            environment.update(pkgdir=str(pkgdir), startdir=str(ROOT))
+            subprocess.run(
+                ["bash", "-c", 'source "$startdir/PKGBUILD" && package'],
+                check=True,
+                env=environment,
+                capture_output=True,
+                text=True,
             )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(Path(result.stdout.strip()).resolve(), root / "configs")
+            self.assertTrue((pkgdir / "usr/bin/cambonos-installer").is_file())
+            self.assertEqual(
+                (pkgdir / "usr/share/cambonos-installer/version").read_text(),
+                "0.2.3-1\n",
+            )
+            self.assertFalse((pkgdir / "usr/share/cambonos-installer/configs").exists())
+
+    def test_installer_does_not_depend_on_configuration_payload(self):
+        installer = ROOT / "files" / "bin" / "cambonos-installer"
+        source = installer.read_text()
+        build = (ROOT / "PKGBUILD").read_text()
+        self.assertNotIn("DATA_DIR", source)
+        self.assertNotIn('cp -a "$DATA_DIR/."', source)
+        self.assertNotIn("configs", build)
 
     def test_yay_is_built_for_all_installs_and_only_used_for_hybrid_nvidia(self):
         installer = ROOT / "files" / "bin" / "cambonos-installer"
@@ -175,21 +183,73 @@ class InstallerPackageTests(unittest.TestCase):
 
     def test_installer_no_longer_embeds_upgrade_service_or_broad_sudo(self):
         installer = (ROOT / "files" / "bin" / "cambonos-installer").read_text()
-        sudoers = (ROOT / "files" / "configs" / "etc" / "sudoers").read_text()
         self.assertIn("pacman -S --noconfirm cambonos-upgrade", installer)
         self.assertIn("pacman -Si cambonos-upgrade", installer)
         self.assertNotIn("cambonos-upgrade.timer", installer)
         self.assertNotIn("cambonos-upgrade.service", installer)
         self.assertNotIn("NOPASSWD: ALL", installer)
-        self.assertNotIn("NOPASSWD: ALL", sudoers)
-        self.assertNotIn("systemd-inhibit", sudoers)
-        self.assertNotIn("grub-mkconfig", sudoers)
-        for path in (
-            ROOT / "files" / "configs" / "etc" / "systemd" / "system" / "cambonos-upgrade.service",
-            ROOT / "files" / "configs" / "etc" / "systemd" / "system" / "cambonos-upgrade.timer",
-            ROOT / "files" / "configs" / "usr" / "bin" / "cambonos-upgrade",
-        ):
-            self.assertFalse(path.exists(), str(path))
+        self.assertNotIn("systemd-inhibit", installer)
+
+    def test_system_defaults_are_generated_and_pam_policy_is_idempotent(self):
+        installer = ROOT / "files" / "bin" / "cambonos-installer"
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory)
+            pam_dir = target / "etc/pam.d"
+            pam_dir.mkdir(parents=True)
+            (pam_dir / "su").write_text(
+                "#%PAM-1.0\n"
+                "auth sufficient pam_rootok.so\n"
+                "#auth required pam_wheel.so use_uid\n"
+                "auth required pam_unix.so\n"
+            )
+            (pam_dir / "su-l").write_text(
+                "#%PAM-1.0\n"
+                "auth include su\n"
+                "account include su\n"
+            )
+            result = subprocess.run(
+                [
+                    "bash", "-c",
+                    'source "$1"; target=$2; '
+                    'run_chroot() { printf "%s\\n" "$*"; }; '
+                    'configure_system_defaults "$target"; configure_pam_wheel "$target"; '
+                    'cat "$target/etc/default/cpupower"; '
+                    'cat "$target/etc/sudoers.d/cambonos-installer"; '
+                    'cat "$target/etc/pam.d/su"; cat "$target/etc/pam.d/su-l"',
+                    "system-defaults-test", str(installer), directory,
+                ], capture_output=True, text=True,
+            )
+            sudoers = target / "etc/sudoers.d/cambonos-installer"
+            sudoers_mode = sudoers.stat().st_mode & 0o777
+            su_file = (pam_dir / "su").read_text()
+            su_l_file = (pam_dir / "su-l").read_text()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("useradd -D -s /bin/zsh", result.stdout)
+        self.assertIn("governor='performance'", result.stdout)
+        self.assertIn("%wheel ALL=(ALL) ALL", result.stdout)
+        self.assertIn("updates ALL=(ALL) NOPASSWD: /usr/bin/pacman", result.stdout)
+        self.assertIn("updates ALL=(ALL) NOPASSWD: /usr/bin/makepkg", result.stdout)
+        self.assertEqual(sudoers_mode, 0o440)
+        self.assertEqual(su_file.count("auth required pam_wheel.so use_uid"), 1)
+        self.assertEqual(su_l_file.count("auth include su"), 1)
+
+    def test_pam_wheel_configuration_fails_on_unrecognized_stack(self):
+        installer = ROOT / "files" / "bin" / "cambonos-installer"
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory)
+            pam_dir = target / "etc/pam.d"
+            pam_dir.mkdir(parents=True)
+            (pam_dir / "su").write_text("auth required pam_unix.so\n")
+            (pam_dir / "su-l").write_text("auth include su\n")
+            result = subprocess.run(
+                [
+                    "bash", "-c",
+                    'source "$1"; fail() { printf "%s\\n" "$1" >&2; exit 1; }; configure_pam_wheel "$2"',
+                    "pam-failure-test", str(installer), directory,
+                ], capture_output=True, text=True,
+            )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("No se pudo aplicar la política wheel", result.stderr)
 
     def test_keyboard_menu_maps_console_and_xorg_layouts(self):
         installer = ROOT / "files" / "bin" / "cambonos-installer"
@@ -671,7 +731,7 @@ class InstallerPackageTests(unittest.TestCase):
 
     def test_sudoers_mode_is_fixed_before_validation(self):
         installer = (ROOT / "files" / "bin" / "cambonos-installer").read_text()
-        set_mode = 'chmod 440 "$MOUNT_POINT/etc/sudoers"'
+        set_mode = 'chmod 440 "$mount_point/etc/sudoers.d/cambonos-installer"'
         self.assertIn(set_mode, installer)
         self.assertLess(installer.index(set_mode), installer.index("run_chroot visudo -c"))
 
