@@ -1,5 +1,5 @@
 pkgname=cambonos-installer
-pkgver=0.2.1
+pkgver=0.2.2
 pkgrel=1
 pkgdesc="CambonOS live system installer"
 arch=('any')

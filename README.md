@@ -7,7 +7,8 @@ El `PKGBUILD` construye el paquete Arch `cambonos-installer`. El ejecutable
 `/usr/bin/cambonos-installer` contiene el flujo completo: selección de opciones,
 particionado, instalación y configuración del sistema. La configuración base del
 live se empaqueta directamente bajo `/usr/share/cambonos-installer/configs/` y
-se incorpora al sistema sin una carpeta intermedia `cambonos-fs`.
+se incorpora al sistema sin una carpeta intermedia `cambonos-fs`; el idioma, la
+zona horaria y el teclado se generan según las opciones elegidas.
 Está destinado al entorno live de CambonOS y debe ejecutarse como root.
 
 Al iniciar el instalador, se activa NetworkManager y se comprueba la conexión al
@@ -38,6 +39,13 @@ hasta 32 caracteres y usar solo letras ASCII, números, guiones o guiones bajos;
 no puede comenzar por guion. La contraseña requiere al menos 8 caracteres,
 una minúscula, una mayúscula, un número y un símbolo distinto de un espacio.
 
+El instalador permite elegir una locale UTF-8 disponible, una zona horaria del
+sistema live y una distribución de teclado compatible con consola y Xorg.
+También pregunta si se desea instalar `cambonos-upgrade`; al aceptarlo, instala
+el paquete desde el repositorio CambonOS, que habilita el timer de actualizaciones
+diarias. La actualización del propio instalador al iniciarse es independiente de
+esa opción.
+
 Durante la instalación, la barra muestra la etapa activa para que las
 operaciones largas no parezcan detenidas. El porcentaje es orientativo y avanza
 por etapas; no representa una medición continua del trabajo restante.
@@ -47,9 +55,6 @@ Para construirlo desde este repositorio en Arch Linux:
 ```sh
 makepkg -si
 ```
-
-# cambonos-upgrade
-Script disponible una vez instalado CambonOS que permite actualizar de forma sencilla los paquetes del sistema incluyendo pacman y aur.
 
 ## CI entre repositorios
 

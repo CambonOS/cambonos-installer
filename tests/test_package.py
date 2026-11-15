@@ -13,7 +13,7 @@ class InstallerPackageTests(unittest.TestCase):
     def test_package_metadata_and_payload(self):
         build = (ROOT / "PKGBUILD").read_text()
         self.assertIn("pkgname=cambonos-installer", build)
-        self.assertIn("pkgver=0.2.1", build)
+        self.assertIn("pkgver=0.2.2", build)
         self.assertIn("pkgrel=1", build)
         self.assertIn("'curl'", build)
         self.assertIn("'networkmanager'", build)
@@ -23,8 +23,24 @@ class InstallerPackageTests(unittest.TestCase):
         self.assertIn('/usr/share/cambonos-installer/version', build)
         self.assertIn('cp -a "$startdir/files/configs/."', build)
         self.assertTrue((ROOT / "files" / "configs" / "etc").is_dir())
-        self.assertTrue((ROOT / "files" / "configs" / "usr").is_dir())
         self.assertTrue((ROOT / "LICENSE").is_file())
+
+    def test_installer_accepts_configs_without_usr_payload(self):
+        installer = ROOT / "files" / "bin" / "cambonos-installer"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "bin").mkdir()
+            (root / "configs" / "etc").mkdir(parents=True)
+            test_installer = root / "bin" / "cambonos-installer"
+            test_installer.write_text(installer.read_text())
+            result = subprocess.run(
+                [
+                    "bash", "-c", 'source "$1"; printf "%s\\n" "$DATA_DIR"',
+                    "config-root-test", str(test_installer),
+                ], capture_output=True, text=True,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(Path(result.stdout.strip()).resolve(), root / "configs")
 
     def test_yay_is_built_for_all_installs_and_only_used_for_hybrid_nvidia(self):
         installer = ROOT / "files" / "bin" / "cambonos-installer"
@@ -68,6 +84,9 @@ class InstallerPackageTests(unittest.TestCase):
                     [
                         "bash", "-c",
                         'source "$1"; selection=$2; '
+                        'choose_locale() { LOCALE=es_ES.UTF-8; }; '
+                        'choose_timezone() { TIMEZONE=Europe/Madrid; }; '
+                        'choose_keyboard() { XKB_LAYOUT=es; VCONSOLE_KEYMAP=es; }; '
                         'dialog_input() { case "$*" in '
                         '*"Nombre del equipo"*) printf test-host ;; '
                         '*"Nombre del usuario"*) printf Testuser ;; '
@@ -79,12 +98,112 @@ class InstallerPackageTests(unittest.TestCase):
                         '*) return 1 ;; esac; }; '
                         'dialog() { [[ "$*" != *"¿Desea instalar el servidor SSH?"* ]]; }; '
                         'choose_disk() { DISK=/dev/test; }; '
-                        'collect_options; printf "%s\\n" "$DESKTOP"',
+                        'collect_options; printf "%s\\n" "$DESKTOP|$LOCALE|$TIMEZONE|$XKB_LAYOUT|$AUTO_UPDATES"',
                         "menu-test", str(installer), selection,
                     ], capture_output=True, text=True,
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(result.stdout.strip(), desktop)
+                self.assertEqual(
+                    result.stdout.strip(),
+                    f"{desktop}|es_ES.UTF-8|Europe/Madrid|es|yes",
+                )
+
+    def test_localization_choices_write_locale_keyboard_and_timezone(self):
+        installer = ROOT / "files" / "bin" / "cambonos-installer"
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory)
+            (target / "etc").mkdir()
+            result = subprocess.run(
+                [
+                    "bash", "-c",
+                    'source "$1"; target=$2; LOCALE=fr_FR.UTF-8; '
+                    'TIMEZONE=Europe/Paris; XKB_LAYOUT=fr; VCONSOLE_KEYMAP=fr; '
+                    'run_chroot() { printf "%s\\n" "$*" >> "$target/chroot.log"; }; '
+                    'configure_localization "$target"; cat "$target/etc/locale.conf"; '
+                    'cat "$target/etc/locale.gen"; cat "$target/etc/vconsole.conf"; '
+                    'cat "$target/etc/X11/xorg.conf.d/00-keyboard.conf"; '
+                    'cat "$target/chroot.log"',
+                    "localization-test", str(installer), directory,
+                ], capture_output=True, text=True,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("LANG=fr_FR.UTF-8\nLANGUAGE=fr_FR.UTF-8\nLC_ALL=fr_FR.UTF-8", result.stdout)
+        self.assertIn("fr_FR.UTF-8 UTF-8\nen_US.UTF-8 UTF-8", result.stdout)
+        self.assertIn("KEYMAP=fr", result.stdout)
+        self.assertIn('Option "XkbLayout" "fr"', result.stdout)
+        self.assertIn("ln -sf /usr/share/zoneinfo/Europe/Paris /etc/localtime", result.stdout)
+        self.assertIn("hwclock --systohc", result.stdout)
+        self.assertIn("locale-gen", result.stdout)
+
+    def test_upgrade_package_installation_is_opt_in(self):
+        installer = ROOT / "files" / "bin" / "cambonos-installer"
+        for enabled in ("yes", "no"):
+            with self.subTest(enabled=enabled):
+                result = subprocess.run(
+                    [
+                        "bash", "-c",
+                        'source "$1"; AUTO_UPDATES=$2; '
+                        'run_chroot() { printf "%s\\n" "$*"; }; '
+                        'install_optional_upgrade_package',
+                        "upgrade-choice-test", str(installer), enabled,
+                    ], capture_output=True, text=True,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(
+                    result.stdout.splitlines(),
+                    ["pacman -S --noconfirm cambonos-upgrade"] if enabled == "yes" else [],
+                )
+
+    def test_upgrade_package_preflight_runs_only_when_selected(self):
+        installer = ROOT / "files" / "bin" / "cambonos-installer"
+        for enabled, available in (("yes", "yes"), ("yes", "no"), ("no", "no")):
+            with self.subTest(enabled=enabled, available=available):
+                result = subprocess.run(
+                    [
+                        "bash", "-c",
+                        'source "$1"; AUTO_UPDATES=$2; available=$3; '
+                        'pacman() { [[ "$*" == "-Si cambonos-upgrade" && "$available" == yes ]]; }; '
+                        'fail() { printf "ERROR:%s\\n" "$1"; exit 1; }; '
+                        'check_optional_upgrade_package',
+                        "upgrade-preflight-test", str(installer), enabled, available,
+                    ], capture_output=True, text=True,
+                )
+                expected = 1 if enabled == "yes" and available == "no" else 0
+                self.assertEqual(result.returncode, expected, result.stderr)
+                if expected:
+                    self.assertIn("cambonos-upgrade", result.stdout)
+
+    def test_installer_no_longer_embeds_upgrade_service_or_broad_sudo(self):
+        installer = (ROOT / "files" / "bin" / "cambonos-installer").read_text()
+        sudoers = (ROOT / "files" / "configs" / "etc" / "sudoers").read_text()
+        self.assertIn("pacman -S --noconfirm cambonos-upgrade", installer)
+        self.assertIn("pacman -Si cambonos-upgrade", installer)
+        self.assertNotIn("cambonos-upgrade.timer", installer)
+        self.assertNotIn("cambonos-upgrade.service", installer)
+        self.assertNotIn("NOPASSWD: ALL", installer)
+        self.assertNotIn("NOPASSWD: ALL", sudoers)
+        self.assertNotIn("systemd-inhibit", sudoers)
+        self.assertNotIn("grub-mkconfig", sudoers)
+        for path in (
+            ROOT / "files" / "configs" / "etc" / "systemd" / "system" / "cambonos-upgrade.service",
+            ROOT / "files" / "configs" / "etc" / "systemd" / "system" / "cambonos-upgrade.timer",
+            ROOT / "files" / "configs" / "usr" / "bin" / "cambonos-upgrade",
+        ):
+            self.assertFalse(path.exists(), str(path))
+
+    def test_keyboard_menu_maps_console_and_xorg_layouts(self):
+        installer = ROOT / "files" / "bin" / "cambonos-installer"
+        result = subprocess.run(
+            [
+                "bash", "-c",
+                'source "$1"; localectl() { printf "es\\nla-latin1\\nus\\nuk\\nfr\\nde-latin1\\nit\\npt-latin1\\n"; }; '
+                'dialog_input() { printf latam; }; choose_keyboard; '
+                'printf "%s|%s\\n" "$XKB_LAYOUT" "$VCONSOLE_KEYMAP"',
+                "keyboard-choice-test", str(installer),
+            ], capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "latam|la-latin1")
 
     def test_cambonos_xfce_preflight_checks_the_destination_channel(self):
         installer = ROOT / "files" / "bin" / "cambonos-installer"

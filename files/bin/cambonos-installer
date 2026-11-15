@@ -10,7 +10,7 @@ fi
 readonly TITLE=" CambonOS Installer ${PACKAGE_VERSION} "
 readonly MOUNT_POINT='/mnt'
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-if [[ -d "$SCRIPT_DIR/../configs/etc" && -d "$SCRIPT_DIR/../configs/usr" ]]; then
+if [[ -d "$SCRIPT_DIR/../configs/etc" ]]; then
 	readonly DATA_DIR="$SCRIPT_DIR/../configs"
 else
 	readonly DATA_DIR='/usr/share/cambonos-installer/configs'
@@ -32,6 +32,11 @@ ADMIN_PASSWORD=''
 DESKTOP=''
 DESKTOP_REPOSITORY=''
 INSTALL_SSH='no'
+LOCALE=''
+TIMEZONE=''
+XKB_LAYOUT=''
+VCONSOLE_KEYMAP=''
+AUTO_UPDATES='no'
 GPU=''
 
 usage() {
@@ -166,6 +171,62 @@ choose_disk() {
 	DISK=$(dialog_input --menu '\nSeleccione el disco de destino:' 16 84 8 "${options[@]}") || return 1
 }
 
+choose_locale() {
+	local locale
+	local -a locales=() options=()
+	[[ -r /usr/share/i18n/SUPPORTED ]] || fail 'No se encuentra la lista de locales disponibles.'
+	mapfile -t locales < <(awk '$1 ~ /\.UTF-8$/ { print $1 }' /usr/share/i18n/SUPPORTED | sort -u)
+	((${#locales[@]})) || fail 'No se encontraron locales UTF-8 disponibles.'
+	for locale in "${locales[@]}"; do
+		options+=("$locale" "$locale")
+	done
+	LOCALE=$(dialog_input --menu '\nSeleccione el idioma y la región:' 20 84 12 "${options[@]}") || return 1
+}
+
+choose_timezone() {
+	local timezone
+	local -a timezones=() options=()
+	mapfile -t timezones < <(timedatectl list-timezones)
+	((${#timezones[@]})) || fail 'No se encontraron zonas horarias disponibles.'
+	for timezone in "${timezones[@]}"; do
+		options+=("$timezone" "$timezone")
+	done
+	TIMEZONE=$(dialog_input --menu '\nSeleccione la zona horaria:' 20 84 12 "${options[@]}") || return 1
+}
+
+choose_keyboard() {
+	local label xkb_layout keymap
+	local -a available_keymaps=() options=()
+	mapfile -t available_keymaps < <(localectl list-keymaps)
+	while IFS='|' read -r label xkb_layout keymap; do
+		if printf '%s\n' "${available_keymaps[@]}" | grep -Fxq "$keymap"; then
+			options+=("$xkb_layout" "$label")
+		fi
+	done <<'EOF'
+Español|es|es
+Latinoamericano|latam|la-latin1
+Inglés (Estados Unidos)|us|us
+Inglés (Reino Unido)|gb|uk
+Francés|fr|fr
+Alemán|de|de-latin1
+Italiano|it|it
+Portugués|pt|pt-latin1
+EOF
+	((${#options[@]})) || fail 'No se encontraron distribuciones de teclado compatibles.'
+	XKB_LAYOUT=$(dialog_input --menu '\nSeleccione la distribución del teclado:' 16 76 8 "${options[@]}") || return 1
+	case "$XKB_LAYOUT" in
+		es) VCONSOLE_KEYMAP='es' ;;
+		latam) VCONSOLE_KEYMAP='la-latin1' ;;
+		us) VCONSOLE_KEYMAP='us' ;;
+		gb) VCONSOLE_KEYMAP='uk' ;;
+		fr) VCONSOLE_KEYMAP='fr' ;;
+		de) VCONSOLE_KEYMAP='de-latin1' ;;
+		it) VCONSOLE_KEYMAP='it' ;;
+		pt) VCONSOLE_KEYMAP='pt-latin1' ;;
+		*) return 1 ;;
+	esac
+}
+
 collect_options() {
 	local value password_confirmation
 	local -a desktops
@@ -203,6 +264,10 @@ collect_options() {
 		fi
 	done
 
+	choose_locale || return 1
+	choose_timezone || return 1
+	choose_keyboard || return 1
+
 	desktops=(1 'Cambon18/XFCE (Recomendado)' 2 'Cambon18/Qtile' 3 'CambonOS/XFCE')
 	value=$(dialog_input --menu '\nSeleccione el entorno de escritorio:' 12 76 4 "${desktops[@]}") || return 1
 	case "$value" in
@@ -216,6 +281,11 @@ collect_options() {
 		INSTALL_SSH='yes'
 	else
 		INSTALL_SSH='no'
+	fi
+	if dialog --title "$TITLE" --yesno '\n¿Desea instalar actualizaciones automáticas del sistema?' 7 76; then
+		AUTO_UPDATES='yes'
+	else
+		AUTO_UPDATES='no'
 	fi
 
 	value=$(dialog_input --menu '\nModo de instalación:' 12 76 4 \
@@ -240,7 +310,7 @@ collect_options() {
 	fi
 
 	local confirmation
-	confirmation="Equipo: $HOSTNAME\nUsuario: $ADMIN_USER\nEscritorio: $DESKTOP\nServidor SSH: $INSTALL_SSH\nModo: $MODE\nArranque: $BOOT_MODE\nDisco: $DISK\n\n"
+	confirmation="Equipo: $HOSTNAME\nUsuario: $ADMIN_USER\nIdioma: $LOCALE\nZona horaria: $TIMEZONE\nTeclado: $XKB_LAYOUT\nEscritorio: $DESKTOP\nServidor SSH: $INSTALL_SSH\nActualizaciones automáticas: $AUTO_UPDATES\nModo: $MODE\nArranque: $BOOT_MODE\nDisco: $DISK\n\n"
 	if [[ "$MODE" == 'clean' ]]; then
 		confirmation+="ATENCIÓN: se borrarán todas las particiones y los datos del disco.\n\n"
 	fi
@@ -262,6 +332,11 @@ check_desktop_source() {
 		*) fail 'No se pudo determinar el canal de CambonOS para el sistema de destino.' ;;
 	esac
 	pacman -Si "$DESKTOP_REPOSITORY/cambonos-xfce" >/dev/null || fail "El paquete cambonos-xfce no está disponible en $DESKTOP_REPOSITORY."
+}
+
+check_optional_upgrade_package() {
+	[[ "$AUTO_UPDATES" == 'yes' ]] || return 0
+	pacman -Si cambonos-upgrade >/dev/null || fail 'El paquete cambonos-upgrade no está disponible en el canal configurado.'
 }
 
 find_free_region() {
@@ -488,6 +563,32 @@ install_desktop() {
 	fi
 }
 
+configure_localization() {
+	local mount_point=${1:-$MOUNT_POINT}
+	printf 'LANG=%s\nLANGUAGE=%s\nLC_ALL=%s\n' "$LOCALE" "$LOCALE" "$LOCALE" > "$mount_point/etc/locale.conf"
+	{
+		printf '%s UTF-8\n' "$LOCALE"
+		[[ "$LOCALE" == 'en_US.UTF-8' ]] || printf 'en_US.UTF-8 UTF-8\n'
+	} > "$mount_point/etc/locale.gen"
+	printf 'KEYMAP=%s\n' "$VCONSOLE_KEYMAP" > "$mount_point/etc/vconsole.conf"
+	install -d "$mount_point/etc/X11/xorg.conf.d"
+	cat > "$mount_point/etc/X11/xorg.conf.d/00-keyboard.conf" <<EOF
+Section "InputClass"
+        Identifier "system-keyboard"
+        MatchIsKeyboard "on"
+        Option "XkbLayout" "$XKB_LAYOUT"
+EndSection
+EOF
+	run_chroot ln -sf "/usr/share/zoneinfo/$TIMEZONE" /etc/localtime
+	run_chroot hwclock --systohc
+	run_chroot locale-gen
+}
+
+install_optional_upgrade_package() {
+	[[ "$AUTO_UPDATES" == 'yes' ]] || return 0
+	run_chroot pacman -S --noconfirm cambonos-upgrade
+}
+
 configure_system() {
 	local -a services
 
@@ -513,6 +614,7 @@ configure_system() {
 	run_chroot usermod -s /bin/zsh root
 	run_chroot passwd --lock root
 	run_chroot systemctl enable cpupower.service accounts-daemon.service NetworkManager.service ntpd.service systemd-resolved.service avahi-daemon.service systemd-homed.service
+	configure_localization "$MOUNT_POINT"
 	progress 43 'Preparando el usuario de mantenimiento y AUR'
 
 	run_chroot groupadd --force updates
@@ -521,8 +623,6 @@ configure_system() {
 	fi
 	run_chroot passwd --lock updates
 	install -d -m 750 "$MOUNT_POINT/etc/sudoers.d"
-	printf 'updates ALL=(ALL) NOPASSWD: ALL\n' > "$MOUNT_POINT/etc/sudoers.d/cambonos-updates"
-	chmod 440 "$MOUNT_POINT/etc/sudoers.d/cambonos-updates"
 	run_chroot visudo -c
 	install_yay_and_optional_optimus_manager
 	progress 54 "Instalando el entorno de escritorio: $DESKTOP"
@@ -560,15 +660,10 @@ EOF
 	run_chroot systemctl enable "${services[@]}"
 	progress 85 'Creando el usuario y configurando idioma y zona horaria'
 
-	run_chroot ln -sf /usr/share/zoneinfo/Europe/Madrid /etc/localtime
-	run_chroot hwclock --systohc
 	run_chroot useradd -m -c "$ADMIN_NAME" -s /bin/zsh -g users -G wheel,rfkill,sys,lp "$ADMIN_USER"
 	printf '%s:%s\n' "$ADMIN_USER" "$ADMIN_PASSWORD" | run_chroot chpasswd
-	run_chroot chown updates:wheel /usr/bin/cambonos-upgrade
-	run_chroot chmod 750 /usr/bin/cambonos-upgrade
 	run_chroot chsh -s /usr/bin/nologin updates
-	run_chroot systemctl enable cambonos-upgrade.timer
-	run_chroot locale-gen
+	install_optional_upgrade_package
 	progress 94 'Instalando GRUB y generando el menu de arranque'
 
 	if [[ "$BOOT_MODE" == 'uefi' ]]; then
@@ -642,13 +737,14 @@ main() {
 		esac
 	fi
 	[[ $EUID -eq 0 ]] || fail 'Ejecute el instalador como root desde el sistema live.'
-	[[ -d "$DATA_DIR/etc" && -d "$DATA_DIR/usr" ]] || fail "No se encuentra el árbol de configuración: $DATA_DIR"
-	require_commands dialog curl nmtui lsblk awk sed parted partprobe udevadm mkfs.vfat mkfs.ext4 mount mountpoint umount timedatectl reflector pacman pacstrap arch-chroot genfstab mkswap swapon fallocate lspci systemctl install cp find chown chmod useradd groupadd passwd chsh visudo git makepkg grub-mkconfig
+	[[ -d "$DATA_DIR/etc" ]] || fail "No se encuentra el árbol de configuración: $DATA_DIR"
+	require_commands dialog curl nmtui lsblk awk sed grep sort localectl parted partprobe udevadm mkfs.vfat mkfs.ext4 mount mountpoint umount timedatectl reflector pacman pacstrap arch-chroot genfstab mkswap swapon fallocate lspci systemctl install cp find chown chmod useradd groupadd passwd chsh visudo git makepkg grub-mkconfig
 	[[ ! -e "$MOUNT_POINT" ]] || [[ -d "$MOUNT_POINT" ]] || fail "$MOUNT_POINT existe y no es un directorio."
 	mountpoint -q "$MOUNT_POINT" && fail "$MOUNT_POINT ya está montado. Desmóntelo antes de iniciar el instalador."
 	prepare_installer "$@" || return $?
 	collect_options || return 0
 	check_desktop_source
+	check_optional_upgrade_package
 	run_installation
 }
 
