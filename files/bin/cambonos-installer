@@ -294,7 +294,7 @@ find_free_region() {
 }
 
 create_partitions() {
-	local efi_end part label type attempt
+	local efi_end part label type attempt efi_count root_count
 	EFI_PARTITION=''
 	ROOT_PARTITION=''
 	EFI_LABEL="CambonOS-EFI-${BASHPID}"
@@ -316,20 +316,30 @@ create_partitions() {
 		efi_end=$(awk -v start="$FREE_START" 'BEGIN { printf "%.3f", start + 1024 }')
 		parted -s -a optimal "$DISK" mkpart "$EFI_LABEL" fat32 "${FREE_START}MiB" "${efi_end}MiB"
 		parted -s -a optimal "$DISK" mkpart "$ROOT_LABEL" ext4 "${efi_end}MiB" "${FREE_END}MiB"
-		part=$(lsblk -lnpo NAME,PARTN,PARTLABEL,TYPE "$DISK" | awk -v label="$EFI_LABEL" '$3 == label && $4 == "part" { print $2; exit}')
-		[[ -n "$part" ]] || fail 'No se pudo identificar la nueva partición EFI.'
-		parted -s "$DISK" set "$part" esp on
 	fi
 
 	partprobe "$DISK"
 	udevadm settle
 	for attempt in {1..10}; do
+		EFI_PARTITION=''
+		ROOT_PARTITION=''
+		efi_count=0
+		root_count=0
 		while read -r part label type; do
 			[[ "$type" == 'part' ]] || continue
-			[[ "$label" == "$EFI_LABEL" ]] && EFI_PARTITION=$part
-			[[ "$label" == "$ROOT_LABEL" ]] && ROOT_PARTITION=$part
+			if [[ "$label" == "$EFI_LABEL" ]]; then
+				EFI_PARTITION=$part
+				((efi_count += 1))
+			fi
+			if [[ "$label" == "$ROOT_LABEL" ]]; then
+				ROOT_PARTITION=$part
+				((root_count += 1))
+			fi
 		done < <(lsblk -lnpo NAME,PARTLABEL,TYPE "$DISK")
-		[[ -n "$ROOT_PARTITION" ]] && break
+		((efi_count <= 1 && root_count <= 1)) || fail 'Las etiquetas de las particiones recién creadas no son únicas.'
+		if [[ -n "$ROOT_PARTITION" && ( "$BOOT_MODE" != 'uefi' || -n "$EFI_PARTITION" ) ]]; then
+			break
+		fi
 		udevadm settle
 		sleep 1
 	done
@@ -339,6 +349,11 @@ create_partitions() {
 	fi
 	if [[ "$MODE" == 'free' ]]; then
 		local root_size
+		part=$(lsblk -dnro PARTN "$EFI_PARTITION")
+		[[ "$part" =~ ^[0-9]+$ ]] || fail 'No se pudo identificar el número de la nueva partición EFI.'
+		parted -s "$DISK" set "$part" esp on
+		partprobe "$DISK"
+		udevadm settle
 		root_size=$(lsblk -bno SIZE "$ROOT_PARTITION")
 		((root_size >= 24 * 1024 * 1024 * 1024)) || fail 'La partición raíz del espacio libre debe tener al menos 24 GiB.'
 	fi

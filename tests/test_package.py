@@ -13,7 +13,8 @@ class InstallerPackageTests(unittest.TestCase):
     def test_package_metadata_and_payload(self):
         build = (ROOT / "PKGBUILD").read_text()
         self.assertIn("pkgname=cambonos-installer", build)
-        self.assertIn("pkgrel=3", build)
+        self.assertIn("pkgver=0.2.1", build)
+        self.assertIn("pkgrel=1", build)
         self.assertIn("'curl'", build)
         self.assertIn("'networkmanager'", build)
         self.assertIn("'parted'", build)
@@ -289,6 +290,76 @@ class InstallerPackageTests(unittest.TestCase):
         self.assertNotIn("installer/dialog.sh", installer)
         for path in ("dialog.sh", "parted.sh", "cambonos-install.sh"):
             self.assertFalse((ROOT / path).exists())
+
+    def test_free_partition_detection_waits_and_targets_only_the_new_efi(self):
+        installer = ROOT / "files" / "bin" / "cambonos-installer"
+        for scenario in ("delayed", "missing-efi", "missing-root", "duplicate-efi", "duplicate-root", "invalid-number"):
+            with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as directory:
+                result = subprocess.run(
+                    [
+                        "bash", "-c",
+                        'source "$1"; scenario=$2; state=$3; '
+                        'DISK=/dev/test; MODE=free; BOOT_MODE=uefi; '
+                        'printf "0\\n" > "$state/settles"; '
+                        'show_error() { printf "%s\\n" "$1" >&2; }; '
+                        'find_free_region() { FREE_START=1000; FREE_END=40000; }; '
+                        'parted() { printf "parted %s\\n" "$*" >> "$state/actions"; }; '
+                        'partprobe() { printf "partprobe\\n" >> "$state/actions"; }; '
+                        'udevadm() { local count; count=$(<"$state/settles"); '
+                        'printf "%s\\n" "$((count + 1))" > "$state/settles"; }; '
+                        'sleep() { :; }; '
+                        'lsblk() { case "$1" in '
+                        '-lnpo) printf "lsblk partitions\\n" >> "$state/actions"; '
+                        'printf "/dev/testp1 Existing-EFI part\\n"; '
+                        'if [[ "$scenario" != missing-root ]]; then '
+                        'printf "/dev/testp10 %s part\\n" "$ROOT_LABEL"; '
+                        'if [[ "$scenario" == duplicate-root ]]; then '
+                        'printf "/dev/testp12 %s part\\n" "$ROOT_LABEL"; fi; fi; '
+                        'if [[ "$scenario" != missing-efi ]] && (( $(<"$state/settles") >= 2 )); then '
+                        'printf "/dev/testp9 %s part\\n" "$EFI_LABEL"; '
+                        'if [[ "$scenario" == duplicate-efi ]]; then '
+                        'printf "/dev/testp11 %s part\\n" "$EFI_LABEL"; fi; fi ;; '
+                        '-dnro) [[ "$2" == PARTN && "$3" == /dev/testp9 ]] || return 1; '
+                        'if [[ "$scenario" == invalid-number ]]; then printf "invalid\\n"; '
+                        'else printf "9\\n"; fi ;; '
+                        '-bno) [[ "$2" == SIZE && "$3" == /dev/testp10 ]] || return 1; '
+                        'printf "32212254720\\n" ;; *) return 1 ;; esac; }; '
+                        'create_partitions; printf "%s %s\\n" "$EFI_PARTITION" "$ROOT_PARTITION"',
+                        "partition-test", str(installer), scenario, directory,
+                    ], capture_output=True, text=True,
+                )
+                actions = (Path(directory) / "actions").read_text().splitlines()
+                self.assertLess(actions.index("partprobe"), actions.index("lsblk partitions"))
+                esp_actions = [action for action in actions if " set " in action]
+                if scenario == "delayed":
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(result.stdout.strip(), "/dev/testp9 /dev/testp10")
+                    self.assertGreaterEqual(actions.count("lsblk partitions"), 2)
+                    self.assertEqual(esp_actions, ["parted -s /dev/test set 9 esp on"])
+                else:
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertEqual(esp_actions, [])
+                    self.assertIn("no son únicas" if scenario.startswith("duplicate-") else "partición", result.stderr)
+
+    def test_clean_partition_detection_supports_uefi_and_bios(self):
+        installer = ROOT / "files" / "bin" / "cambonos-installer"
+        for boot_mode in ("uefi", "bios"):
+            with self.subTest(boot_mode=boot_mode):
+                result = subprocess.run(
+                    [
+                        "bash", "-c",
+                        'source "$1"; DISK=/dev/test; MODE=clean; BOOT_MODE=$2; '
+                        'parted() { :; }; partprobe() { :; }; udevadm() { :; }; '
+                        'lsblk() { printf "/dev/testp2 %s part\\n" "$ROOT_LABEL"; '
+                        'if [[ "$BOOT_MODE" == uefi ]]; then '
+                        'printf "/dev/testp1 %s part\\n" "$EFI_LABEL"; fi; }; '
+                        'create_partitions; printf "%s %s\\n" "$ROOT_PARTITION" "$EFI_PARTITION"',
+                        "clean-partition-test", str(installer), boot_mode,
+                    ], capture_output=True, text=True,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                expected = "/dev/testp2 /dev/testp1" if boot_mode == "uefi" else "/dev/testp2"
+                self.assertEqual(result.stdout.strip(), expected)
 
     def test_dialog_prompts_start_with_a_newline(self):
         installer = (ROOT / "files" / "bin" / "cambonos-installer").read_text()

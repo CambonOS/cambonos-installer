@@ -1,6 +1,6 @@
 pkgname=cambonos-installer
-pkgver=0.2.0
-pkgrel=3
+pkgver=0.2.1
+pkgrel=1
 pkgdesc="CambonOS live system installer"
 arch=('any')
 url="https://github.com/CambonOS/cambonos-installer"
